@@ -1,0 +1,596 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Flat Rate Hours Tracker</title>
+  <!-- Tailwind CSS via CDN for rapid styling -->
+  <link
+    href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css"
+    rel="stylesheet"
+  />
+  <!-- Link to the web app manifest -->
+  <link rel="manifest" href="manifest.webmanifest" />
+  <!-- Register our service worker for offline capability -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function () {
+        navigator.serviceWorker.register('service-worker.js').catch(function (err) {
+          console.error('Service worker registration failed:', err);
+        });
+      });
+    }
+  </script>
+</head>
+<body class="bg-gray-50 min-h-screen">
+  <div class="container mx-auto p-4">
+    <!-- Application title -->
+    <h1 class="text-3xl font-bold mb-4">Flat Rate Hours Tracker</h1>
+
+    <!-- KPI overview cards -->
+    <div id="kpi" class="mb-4 grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div class="p-4 bg-white rounded shadow text-center">
+        <div id="total-hours" class="text-2xl font-bold">0</div>
+        <div class="text-sm text-gray-500">Total Hours</div>
+      </div>
+      <div class="p-4 bg-white rounded shadow text-center">
+        <div id="entry-count" class="text-2xl font-bold">0</div>
+        <div class="text-sm text-gray-500">Entries</div>
+      </div>
+      <div class="p-4 bg-white rounded shadow text-center">
+        <div id="average-hours" class="text-2xl font-bold">0</div>
+        <div class="text-sm text-gray-500">Avg Hours</div>
+      </div>
+    </div>
+
+    <!-- Main content area with form and data table -->
+    <div class="grid grid-cols-1 lg:grid-cols-4 gap-4">
+      <!-- Left panel: Add/Edit form -->
+      <div class="col-span-1 p-4 bg-white rounded shadow">
+        <h2 class="text-xl font-semibold mb-2">Add / Edit Entry</h2>
+        <form id="entry-form" class="space-y-2">
+          <!-- Hidden index for editing existing entries -->
+          <input type="hidden" id="edit-index" value="-1" />
+          <div>
+            <label class="block text-sm font-medium">RO Number</label>
+            <input
+              id="roNumber"
+              type="text"
+              class="w-full border p-2 rounded"
+              required
+            />
+          </div>
+          <div>
+            <label class="block text-sm font-medium">Tag</label>
+            <input id="tag" type="text" class="w-full border p-2 rounded" />
+          </div>
+          <div>
+            <label class="block text-sm font-medium">Work Performed</label>
+            <input
+              id="workPerformed"
+              type="text"
+              class="w-full border p-2 rounded"
+            />
+          </div>
+          <div>
+            <label class="block text-sm font-medium">Hours</label>
+            <input
+              id="hours"
+              type="number"
+              step="0.1"
+              min="0"
+              class="w-full border p-2 rounded"
+              required
+            />
+          </div>
+          <div>
+            <label class="block text-sm font-medium">Pay Type</label>
+            <input id="payType" type="text" class="w-full border p-2 rounded" />
+          </div>
+          <div>
+            <label class="block text-sm font-medium">Service Advisor</label>
+            <input
+              id="serviceAdvisor"
+              type="text"
+              class="w-full border p-2 rounded"
+            />
+          </div>
+          <div>
+            <label class="block text-sm font-medium">Notes</label>
+            <textarea
+              id="notes"
+              class="w-full border p-2 rounded"
+              rows="2"
+            ></textarea>
+          </div>
+          <button
+            type="submit"
+            id="submitButton"
+            class="w-full bg-blue-600 text-white py-2 rounded"
+          >
+            Add
+          </button>
+          <button
+            type="button"
+            id="cancelButton"
+            class="hidden w-full bg-gray-300 py-2 rounded mt-2"
+          >
+            Cancel Edit
+          </button>
+        </form>
+      </div>
+
+      <!-- Right panel: Toolbar and data views -->
+      <div class="col-span-1 lg:col-span-3 p-4 bg-white rounded shadow">
+        <!-- Toolbar with actions and search -->
+        <div
+          class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 space-y-2 sm:space-y-0"
+        >
+          <div class="flex flex-wrap space-x-2">
+            <button
+              id="importBtn"
+              class="bg-green-600 text-white px-3 py-2 rounded"
+            >
+              Import CSV
+            </button>
+            <input
+              type="file"
+              id="importFile"
+              accept=".csv"
+              class="hidden"
+            />
+            <button
+              id="exportBtn"
+              class="bg-purple-600 text-white px-3 py-2 rounded"
+            >
+              Export CSV
+            </button>
+            <button
+              id="clearBtn"
+              class="bg-red-600 text-white px-3 py-2 rounded"
+            >
+              Clear All
+            </button>
+            <button
+              id="groupToggleBtn"
+              class="bg-indigo-600 text-white px-3 py-2 rounded"
+            >
+              Toggle Grouped View
+            </button>
+          </div>
+          <input
+            type="text"
+            id="searchInput"
+            placeholder="Search..."
+            class="border px-3 py-2 rounded w-full sm:w-1/3"
+          />
+        </div>
+        <!-- Entries table -->
+        <div id="entriesContainer" class="overflow-x-auto">
+          <table
+            id="entriesTable"
+            class="min-w-full divide-y divide-gray-200"
+          >
+            <thead>
+              <tr id="tableHeader" class="bg-gray-100">
+                <th
+                  class="px-3 py-2 text-left cursor-pointer"
+                  data-sort="date"
+                >
+                  Date
+                </th>
+                <th
+                  class="px-3 py-2 text-left cursor-pointer"
+                  data-sort="roNumber"
+                >
+                  RO #
+                </th>
+                <th
+                  class="px-3 py-2 text-left cursor-pointer"
+                  data-sort="tag"
+                >
+                  Tag #
+                </th>
+                <th
+                  class="px-3 py-2 text-left cursor-pointer"
+                  data-sort="workPerformed"
+                >
+                  Work Performed
+                </th>
+                <th
+                  class="px-3 py-2 text-left cursor-pointer"
+                  data-sort="hours"
+                >
+                  Hours
+                </th>
+                <th
+                  class="px-3 py-2 text-left cursor-pointer"
+                  data-sort="payType"
+                >
+                  Pay Type
+                </th>
+                <th
+                  class="px-3 py-2 text-left cursor-pointer"
+                  data-sort="serviceAdvisor"
+                >
+                  Service Advisor
+                </th>
+                <th
+                  class="px-3 py-2 text-left cursor-pointer"
+                  data-sort="notes"
+                >
+                  Notes
+                </th>
+              </tr>
+            </thead>
+            <tbody id="entriesBody" class="divide-y divide-gray-100"></tbody>
+          </table>
+          <!-- Container for grouped view; hidden by default -->
+          <div id="groupedContainer" class="hidden"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script>
+    // In-memory array of entries; persisted to localStorage
+    let entries = [];
+    // Toggle between list and grouped view
+    let groupMode = false;
+    // Sorting state
+    let sortField = 'date';
+    let sortDir = 'desc';
+
+    // Utility: load entries from localStorage
+    function loadEntries() {
+      const stored = localStorage.getItem('flatRateEntries');
+      if (stored) {
+        try {
+          entries = JSON.parse(stored);
+        } catch (err) {
+          console.error('Failed to parse stored entries', err);
+          entries = [];
+        }
+      }
+    }
+    // Utility: save entries to localStorage
+    function saveEntries() {
+      localStorage.setItem('flatRateEntries', JSON.stringify(entries));
+      console.log('Entries saved');
+    }
+    // Format a timestamp into MM/DD/YYYY
+    function formatDate(ts) {
+      const d = new Date(ts);
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
+      const yyyy = d.getFullYear();
+      return `${mm}/${dd}/${yyyy}`;
+    }
+    // Update summary KPIs based on a filtered set of entries
+    function updateKPIs(filtered) {
+      const totalHours = filtered.reduce(
+        (sum, e) => sum + parseFloat(e.hours || 0),
+        0
+      );
+      document.getElementById('total-hours').innerText = totalHours.toFixed(2);
+      document.getElementById('entry-count').innerText = filtered.length;
+      document.getElementById('average-hours').innerText =
+        filtered.length > 0
+          ? (totalHours / filtered.length).toFixed(2)
+          : '0';
+    }
+    // Render the standard table view
+    function renderTable() {
+      const body = document.getElementById('entriesBody');
+      body.innerHTML = '';
+      const query = document
+        .getElementById('searchInput')
+        .value.toLowerCase();
+      let filtered = entries.filter(e => {
+        return Object.values(e).some(val => {
+          if (val === undefined || val === null) return false;
+          return val.toString().toLowerCase().includes(query);
+        });
+      });
+      // Sorting logic
+      filtered.sort((a, b) => {
+        let v1 = a[sortField];
+        let v2 = b[sortField];
+        if (sortField === 'date') {
+          // Use createdAt for sorting date column
+          v1 = a.createdAt;
+          v2 = b.createdAt;
+        }
+        if (sortField === 'hours') {
+          v1 = parseFloat(v1);
+          v2 = parseFloat(v2);
+        }
+        if (v1 < v2) return sortDir === 'asc' ? -1 : 1;
+        if (v1 > v2) return sortDir === 'asc' ? 1 : -1;
+        return 0;
+      });
+      // Group mode toggles between table and grouped view
+      if (groupMode) {
+        document.getElementById('entriesTable').classList.add('hidden');
+        document.getElementById('groupedContainer').classList.remove('hidden');
+        renderGrouped(filtered);
+      } else {
+        document.getElementById('entriesTable').classList.remove('hidden');
+        document.getElementById('groupedContainer').classList.add('hidden');
+        filtered.forEach((entry, index) => {
+          const tr = document.createElement('tr');
+          tr.classList.add('hover:bg-gray-50', 'cursor-pointer');
+          tr.addEventListener('click', () => loadEdit(index));
+          tr.innerHTML = `
+            <td class="px-3 py-2">${formatDate(entry.createdAt)}</td>
+            <td class="px-3 py-2">${entry.roNumber || ''}</td>
+            <td class="px-3 py-2">${entry.tag || ''}</td>
+            <td class="px-3 py-2">${entry.workPerformed || ''}</td>
+            <td class="px-3 py-2">${entry.hours || ''}</td>
+            <td class="px-3 py-2">${entry.payType || ''}</td>
+            <td class="px-3 py-2">${entry.serviceAdvisor || ''}</td>
+            <td class="px-3 py-2">${entry.notes || ''}</td>
+          `;
+          body.appendChild(tr);
+        });
+      }
+      updateKPIs(filtered);
+    }
+    // Render grouped-by-date view
+    function renderGrouped(filtered) {
+      const container = document.getElementById('groupedContainer');
+      container.innerHTML = '';
+      // Build groups keyed by formatted date
+      const groups = {};
+      filtered.forEach((entry, index) => {
+        const key = formatDate(entry.createdAt);
+        if (!groups[key]) groups[key] = [];
+        groups[key].push({ entry, index });
+      });
+      // Sort dates descending
+      const sortedDates = Object.keys(groups).sort((a, b) => {
+        const d1 = new Date(a);
+        const d2 = new Date(b);
+        return d2 - d1;
+      });
+      sortedDates.forEach(dateKey => {
+        const list = groups[dateKey];
+        const dayTotal = list.reduce(
+          (sum, item) => sum + parseFloat(item.entry.hours || 0),
+          0
+        );
+        // Header row for this date
+        const header = document.createElement('div');
+        header.classList.add(
+          'bg-gray-100',
+          'px-3',
+          'py-2',
+          'mt-2',
+          'cursor-pointer',
+          'rounded'
+        );
+        header.innerHTML = `<div class="flex justify-between items-center">
+          <span class="font-semibold">${dateKey}</span>
+          <span class="text-sm">Total: ${dayTotal.toFixed(2)}</span>
+        </div>`;
+        // Container for individual rows
+        const detail = document.createElement('div');
+        detail.classList.add('space-y-1', 'mt-2', 'pl-4');
+        list.forEach(({ entry, index: rowIdx }) => {
+          const row = document.createElement('div');
+          row.classList.add(
+            'grid',
+            'grid-cols-7',
+            'gap-2',
+            'bg-white',
+            'p-2',
+            'rounded',
+            'shadow-sm',
+            'hover:bg-gray-50',
+            'cursor-pointer'
+          );
+          row.addEventListener('click', () => loadEdit(rowIdx));
+          row.innerHTML = `
+            <div>${entry.roNumber || ''}</div>
+            <div>${entry.tag || ''}</div>
+            <div>${entry.workPerformed || ''}</div>
+            <div>${entry.hours || ''}</div>
+            <div>${entry.payType || ''}</div>
+            <div>${entry.serviceAdvisor || ''}</div>
+            <div>${entry.notes || ''}</div>
+          `;
+          detail.appendChild(row);
+        });
+        // Collapse/expand logic
+        let collapsed = true;
+        detail.style.display = 'none';
+        header.addEventListener('click', () => {
+          collapsed = !collapsed;
+          detail.style.display = collapsed ? 'none' : 'block';
+        });
+        container.appendChild(header);
+        container.appendChild(detail);
+      });
+      // Update KPIs for grouped view (same as standard)
+      updateKPIs(filtered);
+    }
+    // Load entry into the form for editing
+    function loadEdit(index) {
+      const entry = entries[index];
+      document.getElementById('roNumber').value = entry.roNumber || '';
+      document.getElementById('tag').value = entry.tag || '';
+      document.getElementById('workPerformed').value =
+        entry.workPerformed || '';
+      document.getElementById('hours').value = entry.hours || '';
+      document.getElementById('payType').value = entry.payType || '';
+      document.getElementById('serviceAdvisor').value =
+        entry.serviceAdvisor || '';
+      document.getElementById('notes').value = entry.notes || '';
+      document.getElementById('edit-index').value = index;
+      document.getElementById('submitButton').innerText = 'Update';
+      document.getElementById('cancelButton').classList.remove('hidden');
+    }
+    // Reset form to initial state
+    function clearForm() {
+      document.getElementById('entry-form').reset();
+      document.getElementById('edit-index').value = -1;
+      document.getElementById('submitButton').innerText = 'Add';
+      document.getElementById('cancelButton').classList.add('hidden');
+    }
+
+    // Event listeners
+    document
+      .getElementById('entry-form')
+      .addEventListener('submit', function (e) {
+        e.preventDefault();
+        const idx = parseInt(document.getElementById('edit-index').value, 10);
+        const newEntry = {
+          roNumber: document.getElementById('roNumber').value.trim(),
+          tag: document.getElementById('tag').value.trim(),
+          workPerformed: document.getElementById('workPerformed').value.trim(),
+          hours:
+            parseFloat(document.getElementById('hours').value) >= 0
+              ? parseFloat(document.getElementById('hours').value)
+              : 0,
+          payType: document.getElementById('payType').value.trim(),
+          serviceAdvisor: document
+            .getElementById('serviceAdvisor')
+            .value.trim(),
+          notes: document.getElementById('notes').value.trim(),
+          createdAt:
+            idx >= 0 ? entries[idx].createdAt : new Date().getTime()
+        };
+        if (idx >= 0) {
+          entries[idx] = newEntry;
+        } else {
+          entries.push(newEntry);
+        }
+        saveEntries();
+        clearForm();
+        renderTable();
+      });
+    document.getElementById('cancelButton').addEventListener('click', function () {
+      clearForm();
+    });
+    // Sort when clicking table header
+    document.getElementById('tableHeader').addEventListener('click', e => {
+      const th = e.target.closest('th');
+      if (!th || !th.dataset.sort) return;
+      const field = th.dataset.sort;
+      if (sortField === field) {
+        sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        sortField = field;
+        // Default sort direction: descending for date, ascending otherwise
+        sortDir = field === 'date' ? 'desc' : 'asc';
+      }
+      renderTable();
+    });
+    // Filter by search
+    document
+      .getElementById('searchInput')
+      .addEventListener('input', function () {
+        renderTable();
+      });
+    // Clear all entries
+    document.getElementById('clearBtn').addEventListener('click', function () {
+      if (confirm('Clear all entries?')) {
+        entries = [];
+        saveEntries();
+        renderTable();
+      }
+    });
+    // CSV import
+    document.getElementById('importBtn').addEventListener('click', function () {
+      document.getElementById('importFile').click();
+    });
+    document
+      .getElementById('importFile')
+      .addEventListener('change', function (e) {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = function (event) {
+          const text = event.target.result;
+          const lines = text.split(/\r?\n/).filter(l => l.trim().length);
+          if (lines.length === 0) return;
+          const headers = lines[0].split(',');
+          const idxMap = {
+            roNumber: headers.indexOf('Ro Number'),
+            tag: headers.indexOf('Tag'),
+            workPerformed: headers.indexOf('Work Performed'),
+            hours: headers.indexOf('Hours'),
+            payType: headers.indexOf('Pay Type'),
+            serviceAdvisor: headers.indexOf('Service Advisor'),
+            notes: headers.indexOf('Notes'),
+            createdAt: headers.indexOf('Created At')
+          };
+          for (let i = 1; i < lines.length; i++) {
+            const cols = lines[i].split(',');
+            const entry = {
+              roNumber: cols[idxMap.roNumber] || '',
+              tag: cols[idxMap.tag] || '',
+              workPerformed: cols[idxMap.workPerformed] || '',
+              hours: parseFloat(cols[idxMap.hours]) || 0,
+              payType: cols[idxMap.payType] || '',
+              serviceAdvisor: cols[idxMap.serviceAdvisor] || '',
+              notes: cols[idxMap.notes] || '',
+              createdAt:
+                idxMap.createdAt >= 0 && cols[idxMap.createdAt]
+                  ? parseInt(cols[idxMap.createdAt])
+                  : Date.now()
+            };
+            entries.push(entry);
+          }
+          saveEntries();
+          renderTable();
+        };
+        reader.readAsText(file);
+        // Reset the input to allow re-importing the same file again
+        e.target.value = '';
+      });
+    // CSV export
+    document.getElementById('exportBtn').addEventListener('click', function () {
+      const headers = [
+        'Ro Number',
+        'Tag',
+        'Work Performed',
+        'Hours',
+        'Pay Type',
+        'Service Advisor',
+        'Notes',
+        'Created At'
+      ];
+      const rows = entries.map(e => [
+        e.roNumber || '',
+        e.tag || '',
+        e.workPerformed || '',
+        e.hours || '',
+        e.payType || '',
+        e.serviceAdvisor || '',
+        e.notes || '',
+        e.createdAt
+      ]);
+      const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'flat-rate-hours.csv';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    });
+    // Toggle grouped view
+    document
+      .getElementById('groupToggleBtn')
+      .addEventListener('click', function () {
+        groupMode = !groupMode;
+        renderTable();
+      });
+    // Initial load
+    loadEntries();
+    renderTable();
+  </script>
+</body>
+</html>
